@@ -1,0 +1,18 @@
+[package]
+name = "pong-rust"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+macroquad = "0.4"
+
+# Dependencies build optimised even in debug runs -> smooth dev loop
+[profile.dev.package."*"]
+opt-level = 3
+
+# Smallest, fastest shipped binary
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "z"
+strip = true
