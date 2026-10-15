@@ -2,10 +2,6 @@ use crate::rnd;
 
 // ─── Section 5: Constants ────────────────────────────────────────────
 
-#[allow(dead_code)]
-pub const VIRTUAL_W: f32 = 1280.0;
-#[allow(dead_code)]
-pub const VIRTUAL_H: f32 = 720.0;
 pub const WALL_TOP: f32 = 64.0;
 pub const WALL_BOTTOM: f32 = 704.0;
 pub const LEFT_EDGE: f32 = 24.0;
@@ -13,8 +9,6 @@ pub const RIGHT_EDGE: f32 = 1256.0;
 pub const NET_X: f32 = 640.0;
 pub const PADDLE_W: f32 = 16.0;
 pub const PADDLE_H: f32 = 96.0;
-#[allow(dead_code)]
-pub const PADDLE_MARGIN: f32 = 56.0;
 pub const LEFT_PADDLE_X: f32 = 80.0;
 pub const RIGHT_PADDLE_X: f32 = 1184.0;
 pub const PADDLE_MIN_Y: f32 = 64.0;
@@ -40,13 +34,7 @@ pub const AI_SPEED_HARD: f32 = 700.0;
 pub const AI_ERROR_EASY: f32 = 64.0;
 pub const AI_ERROR_NORMAL: f32 = 30.0;
 pub const AI_ERROR_HARD: f32 = 10.0;
-#[allow(dead_code)]
-pub const AI_REACT_EASY: f32 = 0.34;
-#[allow(dead_code)]
-pub const AI_REACT_NORMAL: f32 = 0.18;
-#[allow(dead_code)]
-pub const AI_REACT_HARD: f32 = 0.07;
-#[allow(dead_code)]
+// Minimum vertical distance (px) the AI will ignore before correcting its aim.
 pub const AI_DEADZONE: f32 = 6.0;
 
 pub const TRAIL_LEN: usize = 10;
@@ -216,12 +204,24 @@ pub fn new_game() -> Game {
 }
 
 pub fn start_match(g: &mut Game, mode: Mode) {
+    // Derive the opening serve direction from the *previous* match's result so
+    // serves stay consistent across rematches instead of always flying right.
+    // This mirrors the in-match rule in `substep`: the ball is served toward the
+    // player who lost the previous point (i.e. away from its winner).
+    //   g.winner == 0  -> left won last time -> serve toward right (+1)
+    //   g.winner == 1  -> right won last time -> serve toward left  (-1)
+    //   g.winner == -1 -> no prior result (fresh game / returned to menu): default right.
+    // NOTE: read `g.winner` before it is reset to -1 a few lines below.
+    g.serve_dir = match g.winner {
+        0 => 1.0,
+        1 => -1.0,
+        _ => 1.0,
+    };
     g.score_left = 0;
     g.score_right = 0;
     g.mode = mode;
     g.phase = Phase::Serve;
     g.serve_timer = SERVE_COUNTDOWN;
-    g.serve_dir = 1.0;
     g.winner = -1;
     g.over_timer = 0.0;
     g.shake = 0.0;
@@ -283,12 +283,6 @@ pub fn ball_aabb_hits_paddle(g: &Game, p: &Paddle) -> bool {
     let pw = p.w;
     let ph = p.h;
     bx1 < px + pw && bx2 > px && by1 < py + ph && by2 > py
-}
-
-#[allow(dead_code)]
-pub fn launch_angle_from_hit(g: &Game, p: &Paddle) -> f32 {
-    let rel = ((g.ball.y - (p.y + p.h * 0.5)) / (p.h * 0.5)).clamp(-1.0, 1.0);
-    rel * MAX_BOUNCE_DEG.to_radians()
 }
 
 pub fn predict_y(g: &Game, target_x: f32) -> f32 {
@@ -399,13 +393,17 @@ pub fn step(g: &mut Game, left_dir: f32, right_dir: f32, dt: f32) -> Option<Even
         return None;
     }
 
-    // 4. Sub-stepping
-    let n = (dt / SUBSTEP_DT).ceil() as i32;
-    let _h = dt / n as f32;
+    // 4. Sub-stepping — advance exactly `dt` total by splitting it into n equal
+    // steps of `h`. Using h (instead of the fixed SUBSTEP_DT) keeps simulated
+    // time locked to real time at any frame rate, so the ball never drifts
+    // faster than intended on non-standard refresh rates. `.max(1)` guards
+    // against a zero-length frame yielding n == 0 and a divide-by-zero `h`.
+    let n = ((dt / SUBSTEP_DT).ceil() as i32).max(1);
+    let h = dt / n as f32;
     let mut last_event: Option<Event> = None;
 
     for _ in 0..n {
-        substep(g, &mut last_event);
+        substep(g, h, &mut last_event);
     }
 
     // 5. Push trail once per frame
@@ -414,9 +412,7 @@ pub fn step(g: &mut Game, left_dir: f32, right_dir: f32, dt: f32) -> Option<Even
     last_event
 }
 
-fn substep(g: &mut Game, ev: &mut Option<Event>) {
-    let dt = SUBSTEP_DT;
-
+fn substep(g: &mut Game, dt: f32, ev: &mut Option<Event>) {
     // Move ball
     g.ball.x += g.ball.vx * dt;
     g.ball.y += g.ball.vy * dt;
@@ -620,7 +616,12 @@ mod tests {
     fn scoring_awards_point_and_serves_against_loser() {
         let mut g = new_game();
         g.phase = Phase::Playing;
-        g.ball.x = LEFT_EDGE - 41.0;
+        // Start the ball already past the left goal line so a single frame's
+        // motion registers the point regardless of sub-step size. The old
+        // `LEFT_EDGE - 41` value only scored because step() over-simulated ~20%
+        // extra time per 60fps frame; that bug is now fixed, so the test must
+        // position the ball to cross within a real frame.
+        g.ball.x = LEFT_EDGE - 50.0;
         g.ball.y = 384.0;
         g.ball.vx = -400.0;
         let _ = step(&mut g, 0.0, 0.0, 1.0 / 60.0);
@@ -634,7 +635,9 @@ mod tests {
         let mut g = new_game();
         g.phase = Phase::Playing;
         g.score_right = WIN_SCORE - 1;
-        g.ball.x = LEFT_EDGE - 41.0;
+        // See scoring test: start past the goal line so the final point lands
+        // within one real frame now that step() no longer over-simulates.
+        g.ball.x = LEFT_EDGE - 50.0;
         g.ball.y = 384.0;
         g.ball.vx = -400.0;
         let _ = step(&mut g, 0.0, 0.0, 1.0 / 60.0);
@@ -680,5 +683,52 @@ mod tests {
         for val in &outputs1 {
             assert!(*val >= 0.0 && *val <= 1.0, "rng output should be in [0, 1]");
         }
+    }
+
+    #[test]
+    fn start_match_serves_toward_previous_loser() {
+        // Left won the previous match -> serve toward the right (the loser).
+        let mut g = new_game();
+        g.winner = 0;
+        start_match(&mut g, Mode::VsPlayer);
+        assert_eq!(g.serve_dir, 1.0, "after left wins, next serve goes toward right");
+
+        // Right won the previous match -> serve toward the left (the loser).
+        let mut g = new_game();
+        g.winner = 1;
+        start_match(&mut g, Mode::VsPlayer);
+        assert_eq!(g.serve_dir, -1.0, "after right wins, next serve goes toward left");
+
+        // No previous result -> default to serving right.
+        let mut g = new_game();
+        g.winner = -1;
+        start_match(&mut g, Mode::VsPlayer);
+        assert_eq!(g.serve_dir, 1.0, "fresh match defaults to serving right");
+    }
+
+    #[test]
+    fn step_advances_exactly_dt() {
+        // A free-flying ball must move exactly vx*dt / vy*dt over one frame:
+        // sub-stepping splits dt evenly and no longer over-simulates real time.
+        let mut g = new_game();
+        g.phase = Phase::Playing;
+        g.ball.x = 600.0;
+        g.ball.y = 384.0;
+        g.ball.vx = 500.0;
+        g.ball.vy = 120.0;
+        let dt = 1.0 / 60.0; // deliberately NOT a multiple of SUBSTEP_DT
+        let x0 = g.ball.x;
+        let y0 = g.ball.y;
+        let _ = step(&mut g, 0.0, 0.0, dt);
+        assert!(
+            (g.ball.x - (x0 + 500.0 * dt)).abs() < 1e-3,
+            "x should advance by exactly vx*dt: got {}",
+            g.ball.x
+        );
+        assert!(
+            (g.ball.y - (y0 + 120.0 * dt)).abs() < 1e-3,
+            "y should advance by exactly vy*dt: got {}",
+            g.ball.y
+        );
     }
 }
