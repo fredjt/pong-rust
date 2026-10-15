@@ -71,9 +71,12 @@ async fn main() {
             }
         }
 
-        // Menu navigation (pressed, not held)
+        // Menu navigation (pressed, not held). The menu has exactly two items,
+        // so both directions toggle between index 0 and 1. Using `(x + 1) % 2`
+        // for Up as well avoids the `wrapping_sub(1)` underflow that produced
+        // usize::MAX (dropped highlight + wrong selection on Enter).
         if is_key_pressed(KeyCode::W) || is_key_pressed(KeyCode::Up) {
-            g.menu_index = g.menu_index.wrapping_sub(1);
+            g.menu_index = (g.menu_index + 1) % 2;
             let _ = audio.play_select();
         }
         if is_key_pressed(KeyCode::S) || is_key_pressed(KeyCode::Down) {
@@ -95,17 +98,11 @@ async fn main() {
             let _ = audio.play_select();
         }
 
-        // Mode selection
-        if is_key_pressed(KeyCode::Key1) && g.phase == game::Phase::Menu {
-            game::start_match(&mut g, game::Mode::VsPlayer);
-            let _ = audio.play_select();
-            continue;
-        }
-        if is_key_pressed(KeyCode::Key2) && g.phase == game::Phase::Menu {
-            game::start_match(&mut g, game::Mode::VsCpu);
-            let _ = audio.play_select();
-            continue;
-        }
+        // Mode selection is intentionally NOT bound to the 1/2 keys: those are
+        // reserved for CPU difficulty above, and binding them here made a single
+        // "1" press both set difficulty AND immediately launch a VsPlayer match.
+        // The mode is chosen by highlighting an item (Up/Down) then confirming
+        // with Enter/Space below.
 
         // Start match from menu (Enter/Space)
         if (is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space))
@@ -295,7 +292,7 @@ async fn main() {
             let controls = [
                 "P1: W / S      P2: UP / DOWN",
                 "ENTER START    ESC PAUSE    M SOUND",
-                "F11 FULLSCREEN   1/2 MODE   1-3 CPU",
+                "F11 FULLSCREEN   UP/DOWN PICK   1-3 CPU",
             ];
             for (i, line) in controls.iter().enumerate() {
                 draw_text(line, 640.0 - measure_text(line, None, 22, 1.0).width / 2.0,

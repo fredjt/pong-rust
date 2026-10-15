@@ -12,11 +12,15 @@ impl Audio {
         Audio { enabled: false }
     }
 
-    pub fn play_paddle(&self) {}
-    pub fn play_wall(&self) {}
-    pub fn play_score(&self) {}
-    pub fn play_win(&self) {}
-    pub fn play_select(&self) {}
+    // Fallback no-op stubs (section 10.3). The `enabled` guard makes the M mute
+    // toggle authoritative at every call site: once real audio synthesis is wired
+    // in, nothing should sound while muted, and callers never have to remember to
+    // gate each call themselves.
+    pub fn play_paddle(&self) { if !self.enabled { return; } }
+    pub fn play_wall(&self)   { if !self.enabled { return; } }
+    pub fn play_score(&self)  { if !self.enabled { return; } }
+    pub fn play_win(&self)    { if !self.enabled { return; } }
+    pub fn play_select(&self) { if !self.enabled { return; } }
 
     pub fn toggle(&mut self) {
         self.enabled = !self.enabled;
