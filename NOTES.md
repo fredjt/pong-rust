@@ -15,7 +15,7 @@ ld-linux-x86-64   — dynamic linker
 Only base system libraries. No bundled runtime, no Python, no engine runtime, no audio library.
 
 ## Audio
-Audio is in fallback mode per section 10.3 of the design doc (no `audio` feature enabled). All `play_*` methods are no-ops.
+Full procedural synthesis (section 10). WAV bytes generated at startup, loaded via `load_sound_from_bytes`, played with `play_sound_once`. Toggle with `M`. Sound is ON by default.
 
 ## Cold Start
 Binary starts instantly (no sound loading in the loop — all sounds are pre-loaded).

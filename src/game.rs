@@ -400,19 +400,20 @@ pub fn step(g: &mut Game, left_dir: f32, right_dir: f32, dt: f32) -> Option<Even
     // against a zero-length frame yielding n == 0 and a divide-by-zero `h`.
     let n = ((dt / SUBSTEP_DT).ceil() as i32).max(1);
     let h = dt / n as f32;
-    let mut last_event: Option<Event> = None;
+    let mut events: Vec<Event> = Vec::new();
 
     for _ in 0..n {
-        substep(g, h, &mut last_event);
+        substep(g, h, &mut events);
     }
 
     // 5. Push trail once per frame
     g.trail.push(g.ball.x, g.ball.y);
 
-    last_event
+    // Return the last event (for backward compatibility with caller)
+    events.last().copied()
 }
 
-fn substep(g: &mut Game, dt: f32, ev: &mut Option<Event>) {
+fn substep(g: &mut Game, dt: f32, events: &mut Vec<Event>) {
     // Move ball
     g.ball.x += g.ball.vx * dt;
     g.ball.y += g.ball.vy * dt;
@@ -421,14 +422,14 @@ fn substep(g: &mut Game, dt: f32, ev: &mut Option<Event>) {
     if g.ball.y - BALL_R < WALL_TOP && g.ball.vy < 0.0 {
         g.ball.y = WALL_TOP + BALL_R;
         g.ball.vy = -g.ball.vy;
-        *ev = Some(Event::Wall);
+        events.push(Event::Wall);
     }
 
     // Bottom wall
     if g.ball.y + BALL_R > WALL_BOTTOM && g.ball.vy > 0.0 {
         g.ball.y = WALL_BOTTOM - BALL_R;
         g.ball.vy = -g.ball.vy;
-        *ev = Some(Event::Wall);
+        events.push(Event::Wall);
     }
 
     // Left paddle
@@ -441,7 +442,7 @@ fn substep(g: &mut Game, dt: f32, ev: &mut Option<Event>) {
         g.left.cooldown = PADDLE_COOLDOWN;
         g.left.flash = FLASH_TIME;
         g.ball.last_hit_by = 0;
-        *ev = Some(Event::PaddleLeft);
+        events.push(Event::PaddleLeft);
     }
 
     // Right paddle
@@ -454,7 +455,7 @@ fn substep(g: &mut Game, dt: f32, ev: &mut Option<Event>) {
         g.right.cooldown = PADDLE_COOLDOWN;
         g.right.flash = FLASH_TIME;
         g.ball.last_hit_by = 1;
-        *ev = Some(Event::PaddleRight);
+        events.push(Event::PaddleRight);
     }
 
     // Scoring
@@ -473,12 +474,12 @@ fn substep(g: &mut Game, dt: f32, ev: &mut Option<Event>) {
             g.winner = 1;
             g.phase = Phase::GameOver;
             g.over_timer = GAMEOVER_HOLD;
-            *ev = Some(Event::MatchOver);
+            events.push(Event::MatchOver);
         } else {
             g.phase = Phase::Serve;
             g.serve_timer = SERVE_COUNTDOWN;
             g.serve_dir = -1.0; // serve toward loser (left)
-            *ev = Some(Event::ScoreRight);
+            events.push(Event::ScoreRight);
         }
     }
 
@@ -497,12 +498,12 @@ fn substep(g: &mut Game, dt: f32, ev: &mut Option<Event>) {
             g.winner = 0;
             g.phase = Phase::GameOver;
             g.over_timer = GAMEOVER_HOLD;
-            *ev = Some(Event::MatchOver);
+            events.push(Event::MatchOver);
         } else {
             g.phase = Phase::Serve;
             g.serve_timer = SERVE_COUNTDOWN;
             g.serve_dir = 1.0; // serve toward loser (right)
-            *ev = Some(Event::ScoreLeft);
+            events.push(Event::ScoreLeft);
         }
     }
 }

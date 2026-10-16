@@ -114,7 +114,7 @@ async fn main() {
                 game::Mode::VsCpu
             };
             game::start_match(&mut g, mode);
-            audio.play_select();
+            let _ = audio.play_select();
             continue;
         }
 
