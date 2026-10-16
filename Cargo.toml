@@ -4,7 +4,7 @@ version = "1.0.0"
 edition = "2021"
 
 [dependencies]
-macroquad = "0.4"
+macroquad = { version = "0.4", features = ["audio"] }
 
 # Dependencies build optimised even in debug runs -> smooth dev loop
 [profile.dev.package."*"]

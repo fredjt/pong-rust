@@ -77,25 +77,25 @@ async fn main() {
         // usize::MAX (dropped highlight + wrong selection on Enter).
         if is_key_pressed(KeyCode::W) || is_key_pressed(KeyCode::Up) {
             g.menu_index = (g.menu_index + 1) % 2;
-            let _ = audio.play_select();
+            audio.play_select();
         }
         if is_key_pressed(KeyCode::S) || is_key_pressed(KeyCode::Down) {
             g.menu_index = (g.menu_index + 1) % 2;
-            let _ = audio.play_select();
+            audio.play_select();
         }
 
         // Difficulty selection
         if is_key_pressed(KeyCode::Key1) {
             g.difficulty = 0;
-            let _ = audio.play_select();
+            audio.play_select();
         }
         if is_key_pressed(KeyCode::Key2) {
             g.difficulty = 1;
-            let _ = audio.play_select();
+            audio.play_select();
         }
         if is_key_pressed(KeyCode::Key3) {
             g.difficulty = 2;
-            let _ = audio.play_select();
+            audio.play_select();
         }
 
         // Mode selection is intentionally NOT bound to the 1/2 keys: those are
@@ -164,11 +164,14 @@ async fn main() {
         }
 
         // ── Game step ───────────────────────────────────────────────
-        let ev = game::step(&mut g, left_dir, right_dir, dt);
+        // `step` returns EVERY event this frame raised, oldest first: a paddle hit and
+        // a point can both land inside one frame's substeps, and playing only the last
+        // of them was the "event loss" bug.
+        let events = game::step(&mut g, left_dir, right_dir, dt);
 
-        // React to events (audio/effects)
-        if let Some(e) = ev {
-            match e {
+        // React to events (audio/effects), oldest first
+        for event in events {
+            match event {
                 game::Event::Wall => audio.play_wall(),
                 game::Event::PaddleLeft => audio.play_paddle(),
                 game::Event::PaddleRight => audio.play_paddle(),
@@ -250,7 +253,7 @@ async fn main() {
         // Layer 8: Serve countdown
         if g.phase == game::Phase::Serve {
             let n = (g.serve_timer / game::SERVE_COUNTDOWN * 3.0).ceil() as i32;
-            if n >= 1 && n <= 3 {
+            if (1..=3).contains(&n) {
                 center_text(&n.to_string(), game::NET_X, 400.0, 120.0, WHITE);
             }
             center_text("GET READY", game::NET_X, 470.0, 28.0, HUD_DIM);
@@ -268,7 +271,8 @@ async fn main() {
                 let y = 330.0 + i as f32 * 45.0;
                 let prefix = if g.menu_index == i { "> " } else { "" };
                 let color = if g.menu_index == i { WHITE } else { GRAY };
-                draw_text(&format!("{}{}", prefix, mode_name),
+                draw_text(
+                    format!("{}{}", prefix, mode_name),
                           640.0 - measure_text(mode_name, None, 34, 1.0).width / 2.0 + 8.0,
                           y, 34.0, color);
             }
