@@ -20,6 +20,13 @@ pub const SERVE_SPEED: f32 = 430.0;
 pub const MAX_BALL_SPEED: f32 = 980.0;
 pub const SPEED_UP: f32 = 1.045;
 pub const MAX_BOUNCE_DEG: f32 = 50.0;
+/// Target *maximum* sub-step length in seconds — the collision-detection resolution
+/// `step()` aims for. A target only: each frame splits `dt` into
+/// `ceil(dt / SUBSTEP_DT)` **equal** sub-steps of `dt / n`, so the real step size is
+/// derived from this and equals it only when `dt` divides exactly. Never advance
+/// physics by `SUBSTEP_DT` itself — that decouples simulated time from real time and
+/// makes the ball run fast at high refresh rates. Lower it for faster balls (a
+/// sub-step should move the ball less than half a paddle width, or it can tunnel).
 pub const SUBSTEP_DT: f32 = 0.004;
 pub const MAX_FRAME_DT: f32 = 0.05;
 pub const PADDLE_COOLDOWN: f32 = 0.10;
@@ -347,7 +354,15 @@ pub fn ai_intent(g: &Game, _dt: f32) -> f32 {
     delta.signum()
 }
 
-pub fn step(g: &mut Game, left_dir: f32, right_dir: f32, dt: f32) -> Option<Event> {
+/// Advance the whole game by one frame and return EVERY event raised during it,
+/// oldest first.
+///
+/// A `Vec`, not an `Option<Event>`: the frame is split into sub-steps, so several
+/// distinct collisions can land inside a single call — a wall bounce in an early
+/// sub-step, a paddle hit in a later one. Handing back only the last event (the old
+/// behaviour) silently dropped all the earlier ones, and their sounds never played.
+pub fn step(g: &mut Game, left_dir: f32, right_dir: f32, dt: f32) -> Vec<Event> {
+    let mut events: Vec<Event> = Vec::new();
     let dt = dt.min(MAX_FRAME_DT);
 
     // 1. Decay timers
@@ -385,12 +400,12 @@ pub fn step(g: &mut Game, left_dir: f32, right_dir: f32, dt: f32) -> Option<Even
             serve_ball(g);
             g.phase = Phase::Playing;
         }
-        return None;
+        return events;
     }
 
     // If not playing, nothing happens
     if g.phase != Phase::Playing {
-        return None;
+        return events;
     }
 
     // 4. Sub-stepping — advance exactly `dt` total by splitting it into n equal
@@ -400,7 +415,6 @@ pub fn step(g: &mut Game, left_dir: f32, right_dir: f32, dt: f32) -> Option<Even
     // against a zero-length frame yielding n == 0 and a divide-by-zero `h`.
     let n = ((dt / SUBSTEP_DT).ceil() as i32).max(1);
     let h = dt / n as f32;
-    let mut events: Vec<Event> = Vec::new();
 
     for _ in 0..n {
         substep(g, h, &mut events);
@@ -409,8 +423,7 @@ pub fn step(g: &mut Game, left_dir: f32, right_dir: f32, dt: f32) -> Option<Even
     // 5. Push trail once per frame
     g.trail.push(g.ball.x, g.ball.y);
 
-    // Return the last event (for backward compatibility with caller)
-    events.last().copied()
+    events
 }
 
 fn substep(g: &mut Game, dt: f32, events: &mut Vec<Event>) {
@@ -731,5 +744,60 @@ mod tests {
             "y should advance by exactly vy*dt: got {}",
             g.ball.y
         );
+    }
+
+    #[test]
+    fn every_event_in_a_frame_is_reported() {
+        // Two collisions inside one frame: the ball clips the top wall in an early
+        // sub-step, then reaches the left paddle before the frame ends. Returning only
+        // the last event (the old behaviour) dropped the wall bounce, so its sound
+        // never played.
+        let mut g = new_game();
+        g.phase = Phase::Playing;
+        g.left.y = PADDLE_MIN_Y; // paddle covers the top of the court
+        g.ball.x = 125.0;
+        g.ball.y = 78.0; // just below the wall limit (WALL_TOP + BALL_R = 73)
+        g.ball.vx = -1400.0;
+        g.ball.vy = -900.0;
+
+        let events = step(&mut g, 0.0, 0.0, 1.0 / 60.0);
+
+        assert_eq!(
+            events,
+            vec![Event::Wall, Event::PaddleLeft],
+            "both collisions of the frame must be reported, oldest first"
+        );
+        assert!(g.ball.vx > 0.0, "ball should have been reflected away");
+    }
+
+    #[test]
+    fn a_single_collision_yields_a_single_event() {
+        let mut g = new_game();
+        g.phase = Phase::Playing;
+        g.left.y = (WALL_TOP + WALL_BOTTOM) * 0.5 - PADDLE_H * 0.5;
+        g.ball.x = LEFT_PADDLE_X + PADDLE_W + BALL_R + 4.0;
+        g.ball.y = (WALL_TOP + WALL_BOTTOM) * 0.5;
+        g.ball.vx = -1400.0;
+        g.ball.vy = 0.0;
+
+        let events = step(&mut g, 0.0, 0.0, 1.0 / 60.0);
+
+        assert_eq!(
+            events,
+            vec![Event::PaddleLeft],
+            "no duplicate events per hit"
+        );
+    }
+
+    #[test]
+    fn a_quiet_frame_reports_no_events() {
+        let mut g = new_game();
+        g.phase = Phase::Playing;
+        g.ball.x = 640.0;
+        g.ball.y = (WALL_TOP + WALL_BOTTOM) * 0.5;
+        g.ball.vx = 0.0;
+        g.ball.vy = 0.0;
+
+        assert!(step(&mut g, 0.0, 0.0, 1.0 / 60.0).is_empty());
     }
 }
